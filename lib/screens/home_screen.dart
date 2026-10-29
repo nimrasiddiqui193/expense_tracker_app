@@ -15,7 +15,18 @@ class _HomeScreenState extends State<HomeScreen> {
   final FirestoreService _firestoreService = FirestoreService();
 
   bool _isAddingTransaction = false;
+  bool _isCheckingBudget = false;
+  bool _isBudgetDialogOpen = false;
   String? _deletingTransactionId;
+  double? _monthlyBudget;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkMonthlyBudget();
+    });
+  }
 
   double _amountOf(Map<String, dynamic> transaction) {
     final amount = transaction['amount'];
@@ -24,15 +35,207 @@ class _HomeScreenState extends State<HomeScreen> {
 
   DateTime _dateOf(Map<String, dynamic> transaction) {
     final date = transaction['date'];
-
     if (date is Timestamp) return date.toDate();
     if (date is DateTime) return date;
-
     return DateTime.now();
   }
 
   String _formatAmount(double amount) {
     return 'Rs. ${amount.toStringAsFixed(2)}';
+  }
+
+  DateTime get _currentMonth {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month);
+  }
+
+  String _monthName(int month) {
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return months[month - 1];
+  }
+
+  Future<void> _checkMonthlyBudget() async {
+    if (_isCheckingBudget || !mounted) return;
+
+    _isCheckingBudget = true;
+
+    try {
+      final budget = await _firestoreService.getMonthlyBudget(_currentMonth);
+
+      if (!mounted) return;
+
+      setState(() => _monthlyBudget = budget);
+
+      if (budget == null) {
+        await _showMonthlyBudgetDialog();
+      }
+    } catch (error, stackTrace) {
+      debugPrint('LOAD MONTHLY BUDGET ERROR: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not load budget: $error'),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    } finally {
+      _isCheckingBudget = false;
+    }
+  }
+
+  Future<void> _showMonthlyBudgetDialog() async {
+    if (!mounted || _isBudgetDialogOpen) return;
+
+    _isBudgetDialogOpen = true;
+
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool isSaving = false;
+
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                title: Text('Set ${_monthName(_currentMonth.month)} Budget'),
+                content: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Enter your budget for this month. '
+                        'Your previous budgets and transactions '
+                        'will remain saved.',
+                      ),
+                      const SizedBox(height: 18),
+                      TextFormField(
+                        controller: controller,
+                        autofocus: true,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Monthly budget',
+                          hintText: 'e.g. 50000',
+                          prefixText: 'Rs. ',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          final amount = double.tryParse((value ?? '').trim());
+
+                          if (amount == null ||
+                              !amount.isFinite ||
+                              amount <= 0) {
+                            return 'Enter an amount greater than zero.';
+                          }
+
+                          return null;
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  FilledButton(
+                    onPressed:
+                        isSaving
+                            ? null
+                            : () async {
+                              if (!(formKey.currentState?.validate() ??
+                                  false)) {
+                                return;
+                              }
+
+                              final amount = double.parse(
+                                controller.text.trim(),
+                              );
+
+                              setDialogState(() => isSaving = true);
+
+                              // Capture the messenger before awaiting Firestore.
+                              final messenger = ScaffoldMessenger.of(
+                                dialogContext,
+                              );
+
+                              try {
+                                await _firestoreService.saveMonthlyBudget(
+                                  month: _currentMonth,
+                                  amount: amount,
+                                );
+
+                                if (!mounted) return;
+
+                                setState(() => _monthlyBudget = amount);
+
+                                if (dialogContext.mounted) {
+                                  Navigator.of(dialogContext).pop();
+                                }
+
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Monthly budget saved successfully.',
+                                    ),
+                                  ),
+                                );
+                              } catch (error, stackTrace) {
+                                debugPrint('MONTHLY BUDGET SAVE ERROR: $error');
+                                debugPrintStack(stackTrace: stackTrace);
+
+                                if (dialogContext.mounted) {
+                                  setDialogState(() => isSaving = false);
+
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Budget save failed: $error',
+                                      ),
+                                      duration: const Duration(seconds: 10),
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                    child:
+                        isSaving
+                            ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                            : const Text('Save budget'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      controller.dispose();
+      _isBudgetDialogOpen = false;
+    }
   }
 
   Future<void> _addTransaction() async {
@@ -60,11 +263,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Could not save transaction. Please try again. ($error)',
-          ),
-        ),
+        SnackBar(content: Text('Could not save transaction: $error')),
       );
     } finally {
       if (mounted) {
@@ -108,13 +307,11 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Transaction deleted.')));
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not delete transaction. Please try again.'),
-        ),
+        SnackBar(content: Text('Could not delete transaction: $error')),
       );
     } finally {
       if (mounted) {
@@ -205,6 +402,117 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildBudgetCard(BuildContext context, double monthlyExpenses) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final budget = _monthlyBudget;
+
+    final progress =
+        budget == null || budget <= 0
+            ? 0.0
+            : (monthlyExpenses / budget).clamp(0.0, 1.0).toDouble();
+
+    final remaining = budget == null ? 0.0 : budget - monthlyExpenses;
+    final overBudget = budget != null && remaining < 0;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: colors.primary,
+                  size: 28,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Monthly budget',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: _showMonthlyBudgetDialog,
+                  tooltip: 'Edit monthly budget',
+                  icon: const Icon(Icons.edit_outlined),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (budget == null) ...[
+              const Text('No budget set for this month yet.'),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _showMonthlyBudgetDialog,
+                icon: const Icon(Icons.add),
+                label: const Text('Set monthly budget'),
+              ),
+            ] else ...[
+              Text(
+                _formatAmount(budget),
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '${_formatAmount(monthlyExpenses)} spent this month',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 9,
+                  backgroundColor: colors.surfaceContainerHighest,
+                  color: overBudget ? colors.error : colors.primary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      overBudget
+                          ? '${_formatAmount(remaining.abs())} over budget'
+                          : '${_formatAmount(remaining)} remaining',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: overBudget ? colors.error : colors.primary,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${(monthlyExpenses / budget * 100).round()}%',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              if (overBudget) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'You have exceeded your monthly budget.',
+                  style: TextStyle(color: colors.error),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildDashboard(
     BuildContext context,
     List<Map<String, dynamic>> transactions,
@@ -215,29 +523,31 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final totalIncome = transactions
         .where((transaction) => transaction['type'] == 'Income')
-        .fold<double>(0.0, (total, transaction) {
-          return total + _amountOf(transaction);
-        });
+        .fold<double>(
+          0,
+          (total, transaction) => total + _amountOf(transaction),
+        );
 
     final totalExpenses = transactions
         .where((transaction) => transaction['type'] == 'Expense')
-        .fold<double>(0.0, (total, transaction) {
-          return total + _amountOf(transaction);
-        });
+        .fold<double>(
+          0,
+          (total, transaction) => total + _amountOf(transaction),
+        );
 
     final balance = totalIncome - totalExpenses;
 
     final monthlyExpenses = transactions
         .where((transaction) {
           final date = _dateOf(transaction);
-
           return transaction['type'] == 'Expense' &&
               date.month == now.month &&
               date.year == now.year;
         })
-        .fold<double>(0.0, (total, transaction) {
-          return total + _amountOf(transaction);
-        });
+        .fold<double>(
+          0,
+          (total, transaction) => total + _amountOf(transaction),
+        );
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -256,8 +566,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 24),
-
-        // Balance card
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
@@ -306,10 +614,27 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-
         const SizedBox(height: 28),
-
-        // Spending overview
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Budget overview',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              '${_monthName(now.month)} ${now.year}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _buildBudgetCard(context, monthlyExpenses),
+        const SizedBox(height: 28),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -360,10 +685,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-
         const SizedBox(height: 28),
-
-        // Recent transactions
         Text(
           'Recent transactions',
           style: theme.textTheme.titleLarge?.copyWith(
@@ -371,7 +693,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 16),
-
         if (transactions.isEmpty)
           Card(
             child: Padding(
@@ -403,10 +724,8 @@ class _HomeScreenState extends State<HomeScreen> {
         else
           ...transactions.take(10).map((transaction) {
             final transactionId = transaction['id'] as String;
-
             return _buildTransactionCard(context, transaction, transactionId);
           }),
-
         const SizedBox(height: 100),
       ],
     );
@@ -419,15 +738,9 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Expense Tracker'),
         actions: [
           IconButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Notifications will be available later.'),
-                ),
-              );
-            },
+            onPressed: _checkMonthlyBudget,
             icon: const Icon(Icons.notifications_none_rounded),
-            tooltip: 'Notifications',
+            tooltip: 'Check monthly budget',
           ),
           const SizedBox(width: 8),
         ],
