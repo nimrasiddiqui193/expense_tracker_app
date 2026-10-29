@@ -1,16 +1,44 @@
-# expense_tracker
+# Expense Tracker App
 
-A new Flutter project.
+A Flutter-based personal expense tracking application.
+
+## Features
+
+- User authentication with Firebase.
+- Add, view, update, and delete transactions.
+- Track income and expenses.
+- View spending statistics.
+- Light and dark theme support.
+- Daily expense reminder notifications.
+- Monthly budget threshold alerts.
+- Cloud Firestore data storage.
+
+## Technologies Used
+
+- Flutter
+- Dart
+- Firebase Authentication
+- Cloud Firestore
+- Flutter Local Notifications
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+1. Install Flutter and Android Studio.
+2. Clone this repository.
+3. Install dependencies:
 
-A few resources to get you started if this is your first Flutter project:
+   ```bash
+   flutter pub get
+   ```
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+4. Configure Firebase for your Android and iOS platforms.
+5. Run the application:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+   ```bash
+   flutter run
+   ```
+
+## Project Purpose
+
+This project is part of a Flutter development portfolio and demonstrates mobile app development, Firebase integration, transaction management, and local notifications.
+
