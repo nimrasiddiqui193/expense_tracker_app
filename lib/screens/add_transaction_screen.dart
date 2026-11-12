@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/theme/app_theme.dart';
+
 class AddTransactionScreen extends StatefulWidget {
   const AddTransactionScreen({super.key});
 
@@ -8,13 +10,18 @@ class AddTransactionScreen extends StatefulWidget {
 }
 
 class _AddTransactionScreenState extends State<AddTransactionScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _amountController = TextEditingController();
-  final _notesController = TextEditingController();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+
+  final TextEditingController _amountController = TextEditingController();
+
+  final TextEditingController _notesController = TextEditingController();
 
   String _type = 'Expense';
   String _category = 'Food';
+
   DateTime _selectedDate = DateTime.now();
+
+  bool _isSaving = false;
 
   final List<String> _expenseCategories = [
     'Food',
@@ -39,6 +46,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   List<String> get _categories =>
       _type == 'Expense' ? _expenseCategories : _incomeCategories;
 
+  bool get _isExpense => _type == 'Expense';
+
   @override
   void dispose() {
     _amountController.dispose();
@@ -47,6 +56,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   }
 
   Future<void> _pickDate() async {
+    if (!mounted || _isSaving) return;
+
     final picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
@@ -54,21 +65,33 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       lastDate: DateTime.now(),
     );
 
-    if (picked != null && mounted) {
-      setState(() {
-        _selectedDate = picked;
-      });
-    }
+    if (!mounted || picked == null) return;
+
+    setState(() {
+      _selectedDate = picked;
+    });
   }
 
   void _saveTransaction() {
-    if (!_formKey.currentState!.validate()) {
+    if (!mounted || _isSaving) return;
+
+    if (!(_formKey.currentState?.validate() ?? false)) {
       return;
     }
 
+    final amount = double.tryParse(_amountController.text.trim());
+
+    if (amount == null || !amount.isFinite || amount <= 0) {
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
     final transaction = <String, dynamic>{
       'type': _type,
-      'amount': double.parse(_amountController.text.trim()),
+      'amount': amount,
       'category': _category,
       'date': _selectedDate,
       'notes': _notesController.text.trim(),
@@ -77,33 +100,135 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     Navigator.of(context).pop(transaction);
   }
 
+  String _formattedDate() {
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+
+    return '${months[_selectedDate.month - 1]} '
+        '${_selectedDate.day}, ${_selectedDate.year}';
+  }
+
+  Widget _sectionLabel(String label, ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        label,
+        style: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _typeButton(String type, IconData icon) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final selected = _type == type;
+
+    final selectedColor =
+        type == 'Expense' ? AppTheme.expenseColor : AppTheme.incomeColor;
+
+    return Expanded(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: selected ? selectedColor : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap:
+                _isSaving
+                    ? null
+                    : () {
+                      if (_type == type) return;
+
+                      setState(() {
+                        _type = type;
+                        _category = _categories.first;
+                      });
+                    },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon,
+                    size: 19,
+                    color: selected ? Colors.white : colors.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 9),
+                  Text(
+                    type,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: selected ? Colors.white : colors.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
 
+    final transactionColor =
+        _isExpense ? AppTheme.expenseColor : AppTheme.incomeColor;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Add Transaction')),
+      appBar: AppBar(title: const Text('Add Transaction'), centerTitle: false),
       body: SafeArea(
         child: Form(
           key: _formKey,
           child: ListView(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 30),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             children: [
               Text(
-                'Record your money movement',
-                style: theme.textTheme.titleMedium?.copyWith(
+                'Track your money',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Add the details of your income or expense.',
+                style: theme.textTheme.bodyMedium?.copyWith(
                   color: colors.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 25),
 
-              // Income and expense selector
+              // Transaction type
               Container(
                 padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
-                  color: colors.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(16),
+                  color: colors.surfaceContainerHighest.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(18),
                 ),
                 child: Row(
                   children: [
@@ -112,41 +237,75 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 25),
 
-              // Amount
-              Text('Amount (PKR)', style: theme.textTheme.titleSmall),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _amountController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+              // Amount card
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: colors.outlineVariant.withValues(alpha: 0.35),
+                  ),
                 ),
-                decoration: const InputDecoration(
-                  prefixText: 'Rs. ',
-                  hintText: '0.00',
-                  prefixIcon: Icon(Icons.payments_outlined),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'TRANSACTION AMOUNT',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+                    TextFormField(
+                      controller: _amountController,
+                      enabled: !_isSaving,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: transactionColor,
+                      ),
+                      decoration: InputDecoration(
+                        prefixText: 'Rs. ',
+                        hintText: '0.00',
+                        prefixIcon: Icon(
+                          Icons.payments_outlined,
+                          color: transactionColor,
+                        ),
+                        filled: true,
+                        fillColor: colors.surfaceContainerHighest.withValues(
+                          alpha: 0.35,
+                        ),
+                      ),
+                      validator: (value) {
+                        final amount = double.tryParse(value?.trim() ?? '');
+
+                        if (amount == null || !amount.isFinite || amount <= 0) {
+                          return 'Enter an amount greater than zero';
+                        }
+
+                        return null;
+                      },
+                    ),
+                  ],
                 ),
-                validator: (value) {
-                  final amount = double.tryParse(value?.trim() ?? '');
-
-                  if (amount == null || !amount.isFinite || amount <= 0) {
-                    return 'Enter an amount greater than zero';
-                  }
-
-                  return null;
-                },
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 25),
 
               // Category
-              Text('Category', style: theme.textTheme.titleSmall),
-              const SizedBox(height: 10),
+              _sectionLabel('Category', theme),
               DropdownButtonFormField<String>(
                 value: _category,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   prefixIcon: Icon(Icons.category_outlined),
+                  hintText: 'Select category',
                 ),
                 items:
                     _categories.map((category) {
@@ -155,41 +314,44 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         child: Text(category),
                       );
                     }).toList(),
-                onChanged: (value) {
-                  if (value == null) return;
+                onChanged:
+                    _isSaving
+                        ? null
+                        : (value) {
+                          if (value == null) return;
 
-                  setState(() {
-                    _category = value;
-                  });
-                },
+                          setState(() {
+                            _category = value;
+                          });
+                        },
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 23),
 
               // Date
-              Text('Date', style: theme.textTheme.titleSmall),
-              const SizedBox(height: 10),
+              _sectionLabel('Transaction Date', theme),
               InkWell(
-                onTap: _pickDate,
-                borderRadius: BorderRadius.circular(14),
+                onTap: _isSaving ? null : _pickDate,
+                borderRadius: BorderRadius.circular(16),
                 child: InputDecorator(
                   decoration: const InputDecoration(
                     prefixIcon: Icon(Icons.calendar_month_outlined),
                     suffixIcon: Icon(Icons.edit_calendar_outlined),
                   ),
                   child: Text(
-                    '${_selectedDate.day.toString().padLeft(2, '0')}/'
-                    '${_selectedDate.month.toString().padLeft(2, '0')}/'
-                    '${_selectedDate.year}',
+                    _formattedDate(),
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 23),
 
-              // Optional notes
-              Text('Notes (Optional)', style: theme.textTheme.titleSmall),
-              const SizedBox(height: 10),
+              // Notes
+              _sectionLabel('Notes (Optional)', theme),
               TextFormField(
                 controller: _notesController,
+                enabled: !_isSaving,
                 maxLines: 3,
                 maxLength: 200,
                 decoration: const InputDecoration(
@@ -198,54 +360,40 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   alignLabelWithHint: true,
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 25),
 
-              // Save transaction
+              // Save button
               SizedBox(
-                height: 54,
+                height: 56,
                 child: FilledButton.icon(
-                  onPressed: _saveTransaction,
-                  icon: const Icon(Icons.check_rounded),
-                  label: const Text('Save Transaction'),
+                  onPressed: _isSaving ? null : _saveTransaction,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colors.primary,
+                    foregroundColor: colors.onPrimary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(17),
+                    ),
+                  ),
+                  icon:
+                      _isSaving
+                          ? const SizedBox(
+                            width: 19,
+                            height: 19,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                          : const Icon(Icons.check_circle_outline_rounded),
+                  label: Text(
+                    _isSaving ? 'Saving...' : 'Save Transaction',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _typeButton(String type, IconData icon) {
-    final selected = _type == type;
-    final colors = Theme.of(context).colorScheme;
-
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.all(2),
-        child: FilledButton(
-          onPressed: () {
-            setState(() {
-              _type = type;
-              _category = _categories.first;
-            });
-          },
-          style: FilledButton.styleFrom(
-            elevation: 0,
-            backgroundColor: selected ? colors.primary : Colors.transparent,
-            foregroundColor:
-                selected ? colors.onPrimary : colors.onSurfaceVariant,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 18),
-              const SizedBox(width: 8),
-              Text(type),
             ],
           ),
         ),
